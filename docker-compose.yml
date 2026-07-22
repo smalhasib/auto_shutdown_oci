@@ -7,13 +7,13 @@ services:
     restart: unless-stopped
     # network_mode: "host" # Uncomment if the container cannot reach the metadata IP (169.254.169.254)
     environment:
-      # Credential options loaded from .env file
-      - OCI_USER=${OCI_USER}
-      - OCI_TENANCY=${OCI_TENANCY}
-      - OCI_FINGERPRINT=${OCI_FINGERPRINT}
-      - OCI_REGION=${OCI_REGION}
-      - OCI_KEY_CONTENT=${OCI_KEY_CONTENT}
-      - OCI_INSTANCE_ID=${OCI_INSTANCE_ID}
+      # Credential options loaded from .env file (Legacy Fallbacks)
+      - OCI_USER=${OCI_USER:-}
+      - OCI_TENANCY=${OCI_TENANCY:-}
+      - OCI_FINGERPRINT=${OCI_FINGERPRINT:-}
+      - OCI_REGION=${OCI_REGION:-}
+      - OCI_KEY_CONTENT=${OCI_KEY_CONTENT:-}
+      - OCI_INSTANCE_ID=${OCI_INSTANCE_ID:-}
       
       # Check interval in seconds (1800 = 30 minutes)
       - CHECK_INTERVAL=${CHECK_INTERVAL:-1800}

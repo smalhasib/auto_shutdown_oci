@@ -27,37 +27,55 @@ def get_metadata_value(path):
     return None
 
 def load_oci_config():
-    """Prepares the OCI configuration based on environment variables."""
-    user = os.environ.get("OCI_USER")
-    tenancy = os.environ.get("OCI_TENANCY")
-    fingerprint = os.environ.get("OCI_FINGERPRINT")
-    region = os.environ.get("OCI_REGION")
-    key_content = os.environ.get("OCI_KEY_CONTENT")
-
-    # If region is not provided, try to fetch it from metadata
-    if not region:
-        print("[INFO] OCI_REGION not provided in environment. Attempting to retrieve from IMDS...")
+    """Priority: Instance Principal > env vars (API key) > ~/.oci/config file."""
+    # Strategy 1: Instance Principal (no secrets on disk)
+    try:
+        signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
         region = get_metadata_value("canonicalRegionName") or get_metadata_value("region")
         if region:
-            print(f"[INFO] Auto-detected region from metadata: {region}")
+            signer.region = region
+        print("[INIT] Authenticated via OCI Instance Principal (no API key required).")
+        return {"auth_type": "instance_principal", "signer": signer, "region": region}
+    except Exception as e:
+        print(f"[INFO] Instance Principal not available: {e}")
 
-    if user and tenancy and fingerprint and key_content and region:
-        # Clean potential quotes and replace newlines robustly
-        pem_key = key_content.strip('"').strip("'").replace("\\\\n", "\n").replace("\\n", "\n")
-        return {
-            "user": user,
-            "tenancy": tenancy,
-            "fingerprint": fingerprint,
-            "region": region,
-            "key_content": pem_key
-        }
+    # Strategy 2: Environment variables (API key - legacy fallback)
+    try:
+        user = os.environ.get("OCI_USER")
+        tenancy = os.environ.get("OCI_TENANCY")
+        fingerprint = os.environ.get("OCI_FINGERPRINT")
+        region = os.environ.get("OCI_REGION")
+        key_content = os.environ.get("OCI_KEY_CONTENT")
+
+        if not region:
+            print("[INFO] OCI_REGION not provided in environment. Attempting to retrieve from IMDS...")
+            region = get_metadata_value("canonicalRegionName") or get_metadata_value("region")
+            if region:
+                print(f"[INFO] Auto-detected region from metadata: {region}")
+
+        if user and tenancy and fingerprint and key_content and region:
+            pem_key = key_content.strip('"').strip("'").replace("\\\\n", "\n").replace("\\n", "\n")
+            config = {
+                "user": user,
+                "tenancy": tenancy,
+                "fingerprint": fingerprint,
+                "region": region,
+                "key_content": pem_key
+            }
+            oci_config = oci.config.from_dict(config)
+            print("[INIT] Authenticated via API key (legacy fallback).")
+            return {"auth_type": "api_key", "config": oci_config, "region": region}
+    except Exception as e:
+        print(f"[ERROR] Failed to load API key config: {e}")
     
-    # Alternative: load configuration from the mounted ~/.oci/config file
+    # Strategy 3: load configuration from the mounted ~/.oci/config file
     default_config_path = "/root/.oci/config"
     if os.path.exists(default_config_path):
         try:
             profile = os.environ.get("OCI_PROFILE", "DEFAULT")
-            return oci.config.from_file(default_config_path, profile)
+            oci_config = oci.config.from_file(default_config_path, profile)
+            print("[INIT] Authenticated via ~/.oci/config file.")
+            return {"auth_type": "api_key", "config": oci_config, "region": oci_config.get("region")}
         except Exception as e:
             print(f"[ERROR] Error loading config from {default_config_path}: {e}")
             
@@ -106,9 +124,20 @@ def run_monitor():
     if compartment_id:
         print(f"[INIT] Compartment detected: {compartment_id}")
 
-    budget_client = oci.budget.BudgetClient(config)
-    compute_client = oci.core.ComputeClient(config)
-    tenancy_id = config.get("tenancy")
+    auth_type = config.get("auth_type")
+    if auth_type == "instance_principal":
+        signer = config["signer"]
+        budget_client = oci.budget.BudgetClient(config={}, signer=signer)
+        compute_client = oci.core.ComputeClient(config={}, signer=signer)
+        tenancy_id = os.environ.get("OCI_TENANCY") or compartment_id
+    else:
+        # Support fallback when config is directly dict or loaded config object
+        oci_config = config.get("config") if isinstance(config, dict) else config
+        budget_client = oci.budget.BudgetClient(oci_config)
+        compute_client = oci.core.ComputeClient(oci_config)
+        tenancy_id = oci_config.get("tenancy") if isinstance(oci_config, dict) else None
+        if not tenancy_id:
+            tenancy_id = os.environ.get("OCI_TENANCY")
 
     while True:
         try:
