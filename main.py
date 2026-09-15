@@ -28,16 +28,21 @@ def get_metadata_value(path):
 
 def load_oci_config():
     """Priority: Instance Principal > env vars (API key) > ~/.oci/config file."""
-    # Strategy 1: Instance Principal (no secrets on disk)
-    try:
-        signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
-        region = get_metadata_value("canonicalRegionName") or get_metadata_value("region")
-        if region:
-            signer.region = region
-        print("[INIT] Authenticated via OCI Instance Principal (no API key required).")
-        return {"auth_type": "instance_principal", "signer": signer, "region": region}
-    except Exception as e:
-        print(f"[INFO] Instance Principal not available: {e}")
+    auth_method = os.environ.get("OCI_AUTH_METHOD", "auto").lower()
+
+    # Strategy 1: Instance Principal (no secrets on disk) — skipped when OCI_AUTH_METHOD=api_key
+    if auth_method != "api_key":
+        try:
+            signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
+            region = get_metadata_value("canonicalRegionName") or get_metadata_value("region")
+            if region:
+                signer.region = region
+            print("[INIT] Authenticated via OCI Instance Principal (no API key required).")
+            return {"auth_type": "instance_principal", "signer": signer, "region": region}
+        except Exception as e:
+            print(f"[INFO] Instance Principal not available: {e}")
+    else:
+        print("[INIT] OCI_AUTH_METHOD=api_key -> skipping Instance Principal, using API key.")
 
     # Strategy 2: Environment variables (API key - legacy fallback)
     try:
