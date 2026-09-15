@@ -200,6 +200,13 @@ def run_monitor():
         except Exception as e:
             print(f"[ERROR] Error during review: {e}")
             
+        # Heartbeat: record each completed cycle so the container healthcheck can detect a stuck loop
+        try:
+            with open("/tmp/heartbeat", "w") as _hb:
+                _hb.write(str(int(time.time())))
+        except Exception:
+            pass
+
         print(f"Waiting {CHECK_INTERVAL_SECONDS} seconds for the next check...")
         time.sleep(CHECK_INTERVAL_SECONDS)
 
